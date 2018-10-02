@@ -121,8 +121,8 @@ limitations under the License.
                 va.googleHelper.formatData(_dataTable, resultData);
 					
 					//Arreglo el nodo raíz
-					for (var r = 0; r < dataTable.length; r++) {				
-						if (dataTable[r][1] === "(ausente)" || dataTable[r][1] === ".") {dataTable[r][1] = "";}
+					for (var r = 0; r < _dataTable.length; r++) {				
+						if (_dataTable[r][1] === "(ausente)" || _dataTable[r][1] === ".") {_dataTable[r][1] = "";}
 					}
                 _selections = va.contentUtil.initializeSelections(resultData);
             }
