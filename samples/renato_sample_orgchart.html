@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <script type="text/javascript" src="https://www.gstatic.com/charts/loader.js"></script>
+
+    <style>
+
+		html {
+			overflow: hidden;
+		}
+
+		html, body, #ddc_chart {
+			margin: 0px;
+			padding: 0px;
+			height: 100%;
+			width: 100%;
+		}
+		
+		#ddc_chart {
+            position: relative;
+			border-style: none;
+			border-width: 0px;
+			overflow: auto;
+		}
+
+	</style>
+	
+    <script type="text/javascript">
+		"use strict"; // just a best practice
+
+		
+		console.log("************************************************************************");
+		console.log("********************IN DATA DRIVEN CONTENT CODE ************************");
+		console.log("************************************************************************");
+		
+		//**********************************************************
+		//**********************************************************
+		// THIS PART IS HOW THE THIRD PARTY CODE WOULD NORMALLY WORK
+		//**********************************************************
+		//**********************************************************
+		
+		var g_options = {
+			allowCollapse: true,
+			allowHtml: true,
+			size: 'small', // small, medium, large
+		};
+		var g_dummyDataTable = null;
+		
+		google.charts.load("current", {packages:["orgchart"]});
+		google.charts.setOnLoadCallback(initiateChart);
+
+		// Objects chart and dataTable must be made global because of event handlers
+		// We also need to make sure the data is ready before we try to draw the chart
+	    function initiateChart() {
+			console.log("********************initiateChart************************");
+			// This dummy table is to be used as a placeholder while the Data-Driven Content object roles are not set
+			g_dummyDataTable = new google.visualization.DataTable();
+			g_dummyDataTable.addColumn({ type: 'string', id: 'Name' });
+			g_dummyDataTable.addColumn({ type: 'string', id: 'Manager' });
+			g_dummyDataTable.addColumn({ type: 'string', id: 'ToolTip' });
+			g_dummyDataTable.addRows([
+			  [{v:'Mike', f:'Mike<div style="color:red; font-style:italic">President</div>'}, '', 'The President'],
+			  [{v:'Jim', f:'Jim<div style="color:red; font-style:italic">Vice President</div>'}, 'Mike', 'VP'],
+			  ['Alice', 'Mike', ''],
+			  ['Bob', 'Jim', 'Bob Sponge'],
+			  ['Carol', 'Bob', '']
+			]);
+			
+		    g_chart = new google.visualization.OrgChart(document.getElementById('ddc_chart'));
+
+			// This was added because Google documentation for Calendar says we need to make sure the chart is ready before calling methods on it
+			google.visualization.events.addListener(g_chart, 'ready', readyHandler);
+		
+			// This was added to support data brushing from Data-Driven Object to other VA objects
+			google.visualization.events.addListener(g_chart, 'select', selectHandler);
+				
+			drawChart();
+		}
+
+		
+		
+		//**********************************************************************************
+		//**********************************************************************************
+		// THIS PART OF THE CODE CUSTOM WRITTEN TO MAKE THE BRIDGE WITH THE THIRD PARTY CODE
+		//**********************************************************************************
+		//**********************************************************************************
+		
+		// Added global variables to facilitate event handling
+        var g_VAMessage = null; 	// this will become a pointer to event.data coming from VA
+		var g_dataTable = null; 	// this will hold the data array as a DataTable object 
+		var g_chart = null;			// this will point to the chart object
+		var g_selections = [];		// this will contain the linked selections (brush) coming from VA
+		
+		function drawChart() {
+			if (!g_chart) return;
+			console.log("********************drawChart************************");
+			
+			var dataTable = (g_dataTable ? g_dataTable : g_dummyDataTable);
+			console.log(dataTable);
+			
+			g_chart.draw(dataTable, g_options);
+		}
+		
+		// This gets called when the chart is "ready" for interaction - after chart.draw() finishes
+		//
+		function readyHandler(e) {
+			console.log("********************readyHandler************************");
+			console.log(g_selections);
+			// The documentation says that setSelection should not fire a select event
+			// https://developers.google.com/chart/interactive/docs/reference#setselection
+			// Handle data brushing
+			g_chart.setSelection(g_selections);
+		};
+		
+		// Data brushing from Data-Driven Object to other VA objects
+		//
+		function selectHandler(e) {
+			console.log("********************selectHandler************************");
+			console.log(g_VAMessage);
+			
+			var selection = g_chart.getSelection();
+			console.log(selection);
+			
+			sendSelection(selection, g_VAMessage.resultName);
+		};
+		
+		// Redraw graph when window resize is completed  
+		//
+		var resizeEndEvent = new Event('resizeEnd');
+		window.addEventListener('resizeEnd', function() {
+			drawChart();
+		});
+		// Create trigger to resizeEnd event
+		var resizeTO = null;
+		window.addEventListener("resize", function() {
+			if (resizeTO) 
+				clearTimeout(resizeTO);
+			resizeTO = setTimeout(function() {
+				window.dispatchEvent(resizeEndEvent);
+			}, 25);
+		});
+		
+		function eventHandlerFromVA(messageFromVA) {
+			console.log("********************eventHandlerFromVA************************");
+			console.log(messageFromVA);
+			
+			// Saves the message for eventual Google Chart event handlers
+			g_VAMessage = messageFromVA;
+
+			// arrayData points to the real data object, so any changes to it will affect the data object
+			var arrayData = messageFromVA.data;			
+			var columnsInfo = messageFromVA.columns;
+			
+			// Extract selections (if any) and reformat the data to eliminate the column that indicates "brush"
+			console.log("--------------------createSelections------------------------");
+			createSelections (arrayData, columnsInfo);
+			console.log(g_selections);
+			
+			// Validate message contains right attributes
+			// e.g. Google Calendar expects a DataTable object with 2 columns, in this order: date and number
+			console.log("--------------------validateRoles------------------------");
+			if (!validateRoles(columnsInfo, ["string","string"], ["string","string"])) {
+				sendInstructionalMessage("Google OrgChart expects columns to be assigned in this order:\n" +
+					" 1. Node ID (string)\n" +
+					" 2. Parent ID (string)\n" + 
+					" 3. Formatted Node ID (string, optional). An empty string means no formatted value\n" + 
+					" 4. Tooltip (string, optional)", messageFromVA.resultName);
+				return;
+			}
+
+			// Transform data as required by target chart
+			console.log("--------------------convertData------------------------");
+			convertDataOrgChart(arrayData, columnsInfo);
+			// Inserts columnsInfo (columns header) at position 0 in the array (required to use method arrayToDataTable)
+			// The way that the *column* attribute is structured matches what Google Charts expect to receive, especially 
+			// the *type* attribute, so it can be inserted without any transformation.
+			arrayData.splice(0, 0, columnsInfo);
+			console.log(messageFromVA);
+			g_dataTable = google.visualization.arrayToDataTable(arrayData);
+			
+			// Refresh chart
+			drawChart();
+		}
+		
+		// Extract selections into g_selections and and reformat the data to eliminate the column that indicates items being "brushed"
+		// Example of selections array for Google: [{row: 3, column: null}, {row: 4, column: null}, {row: 9, column: null}]
+		//
+		function createSelections (arrayData, columnsInfo) {
+			g_selections = []; 
+			for (var c = 0; c < columnsInfo.length; c++) {
+				var colInfo = columnsInfo[c];
+				if (columnsInfo[c].usage) {
+					if (columnsInfo[c].usage === "brush") {
+						// remove the column info
+					    columnsInfo.splice(c,1);
+						// for each row of data, check the bush column for indication of row selection
+						for (var r = 0; r < arrayData.length; r++) {
+							if (arrayData[r][c] !== 0) {
+								// row r has been selected
+								console.log("row:"+r);
+								g_selections.push({row: r, column: null});
+							}
+							// remove the value of the brush column from the row being processed
+							arrayData[r].splice(c,1);
+						}
+						return;
+					}
+				}				
+			}
+		}
+
+		function validateRoles(columnsInfo, expectedTypes, expectedOptionalTypes) {
+			// Check the required columns 
+			if (columnsInfo.length < expectedTypes.length) return false;
+			for (var c = 0; c < expectedTypes.length; c++) {
+				if (columnsInfo[c].type !== expectedTypes[c]) return false;
+			}
+			// Check the optional columns (if any)
+			if (columnsInfo.length > expectedTypes.length) {
+				for (var c = expectedTypes.length, i = 0; c < columnsInfo.length; c++, i++) {
+					if (columnsInfo[c].type !== expectedOptionalTypes[i]) return false;
+				}
+			}
+			return true;
+		}
+
+		
+		function convertDataOrgChart(arrayData, columnsInfo) {
+			var numCols = columnsInfo.length;
+			for (var r = 0; r < arrayData.length; r++) {
+				// At the highest level, there is no parent ID (= "missing" for string column or "." for numeric column).
+				// An empty string as the parent ID will prevent the node to be displayed with a missing value.
+			    if (arrayData[r][1] === "(missing)" || arrayData[r][1] === ".") {arrayData[r][1] = "";}
+				if (numCols >= 3 && arrayData[r][2] !== '') {
+					// if an optional formatted role is provided (3rd column), add that to node ID (1st column) as {v: unformattedValue, f: formattedValue}
+					// note: an empty 3rd column means no formatted value
+					arrayData[r][0] = {v: arrayData[r][0], f: arrayData[r][2]};
+				}
+				if (numCols >= 3) {
+					// Tooltip (if any) must be the third column for Google OrgChart
+					// Remove column #3 (format) and let column #4 (tooltip, if any) automatically become column #3
+					arrayData[r].splice(2,1);
+				}
+			}
+			if (numCols >= 3) {
+				// Tooltip (if any) must be the third column for Google OrgChart
+				// Remove column #3 (format) and let column #4 (tooltip, if any) automatically become column #3
+				columnsInfo.splice(2,1);
+			}
+		}
+		
+		
+		
+		//****************************************************
+		//****************************************************
+		// THIS PART OF THE CODE IS NEEDED FOR ANY EXAMPLE
+		//****************************************************
+		//****************************************************
+		
+		//===============
+		// RECEIVING DATA
+		//===============
+		
+		/*
+		The way VA shares data with the Data-Driven Content object is using the HTML5 window.postMessage() API. 
+		This API allows for sending data messages between 2 windows/frames. So when a query is executed in VA, 
+		VA receives the data and will then make a *postMessage* call to send the data to the html page specified 
+		by the Data-Driven Content. In order for the Data-Driven Content to receive the data, it needs to add a listener.
+		*/
+		if (window.addEventListener) {
+			// For standards-compliant web browsers
+		    window.addEventListener("message", onMessage, false);
+	    } else {
+		    window.attachEvent("onmessage", onMessage);
+	    }
+
+		/*
+		The onMessage function will be called each time the data for the Data-Driven Content is updated. 
+		The event.data object will be a JSON object and the structure of this data looks like this:
+		
+		
+		Most used attributes from event.data:
+
+		resultName - The name of the associated query result. 
+		             This name will be needed for communicating any messages from the Data-Drive Content back to VA.  
+		data       - The query results stored in a two-dimensional array. 
+		             The data is in row-major order. So event.data.data[0] is the first row of data and event.data.data[0][0]
+					 is the first columns data in the first row. The data in this array is unformatted for measures, so specifying 
+					 a format for a measure will have no impact on the data returned. Dates and date times are formatted, so the data 
+					 will reflect the format the is specified on any date or date time variable.  
+		rowCount   - The number of rows of data returned. 
+		             If all the data has been filtered out or no data items are assigned to the object, the row count will be 0.  
+		columns    - An array of column objects which let the author determine the type of data, as well as other attributes like the format, label, etc.
+					 If a column has a *usage* attribute that has a value of *brush*, then this column of data is to control selection and 
+					 should not be processed with the rest of the data. In that case, if a row is to be selected, it will have a value greater than 0, 
+					 if the row is not selected, it will have a value of 0. A column with the usage attribute set to *brush* is added when the
+					 Data-Driven Content is a target of a linked selection. In the sample data below, the first row and third row of data 
+					 is to be selected, the second row should not be selected. If the Data-Driven Content author wants the visualization 
+					 to honor the linked selection, then it will be the author's responsibility to make the selections on their visualization,
+					 and possibly recreate the *data* attribute without the brush column as well as 
+		parameters - An array of parameter objects which the Data-Driven Content consumed when executing the query. 
+		             This array of parameter objects let the report author access the current value of the parameters as well as other 
+					 attributes on the parameter. Only the parameters which are used by the query will be returned in this array.
+					 
+					 
+		Example of event.data:
+		
+		{
+		"version" : "1",
+		"resultName" : "dd40",
+		"rowCount" : 3,
+		"availableRowCount" : 3,
+		"data" : [ [ "Finch", 95000.0, 0.42857142857142855 ], [ "Jones", 26000.0, 0.0 ], [ "Smith", 108000.0, 0.5 ] ],
+		"columns" : [ {
+			"name" : "bi184",
+			"label" : "dealer",
+			"type" : "string"
+		}, {
+			"name" : "bi258",
+			"label" : "sales",
+			"type" : "number",
+			"usage" : "quantitative",
+			"aggregation" : "sum",
+			"format" : {
+				"name" : "BEST",
+				"width" : 12,
+				"precision" : 0,
+				"formatString" : "BEST12."
+			}
+		}, {
+			"name" : "ri1",
+			"type" : "number",
+			"usage" : "brush",
+			"format" : {
+				"name" : "COMMA",
+				"width" : 12,
+				"precision" : 2,
+				"formatString" : "COMMA12.2"
+			}
+		} ]
+		}
+		*/
+		
+		// Hook for retrieve data and begin processing
+		function onMessage(event) {
+			if (event && event.data && 
+				event.data.hasOwnProperty("data") && event.data.hasOwnProperty("columns") && event.data.hasOwnProperty("resultName") )
+			{
+				// Process event.data
+				// Because data will dynamically change, we need an event handler to to redraw the chart
+				eventHandlerFromVA(event.data);
+			}
+		}
+
+		//========================================
+		// LINKED SELECTION HANDLING (AS A SOURCE)
+		//========================================
+		
+		/*
+		The author of the Data-Driven Content needs to communicate back to VA whenever a selection is made in their custom visualization. 
+		This message is needed in order for the object to participate in interactions in which the object is the source of the interaction. 
+		In the message that is sent to VA, the message needs to include the *resultName* attribute (retrieved from the data in which VA sent 
+		to the visualization). VA needs to know which rows of data were selected so the message needs a *selections* attribute that contains 
+		an array of row numbers. or an array of objects that specify the selected row numbers (where 0 is the first row of data). Each entry 
+		in the selections array of objects needs to have an attribute of *row* with a value of the selected row. 
+		Example of valid selections: 
+		[0, 3, 4]
+		[{row: 0}, {row: 3}, {row: 4}]
+		*/
+		
+		function sendSelection(selectedRows, resultName) {
+			var selections;
+			if (selectedRows && selectedRows.length > 0 && selectedRows[0].hasOwnProperty("row")) {
+				selections = selectedRows;
+			}
+			else {
+				selections = [];
+				selectedRows.forEach(function (selRow) {
+					selections.push({row: selRow});
+				});
+			}
+			var message = {
+				resultName: resultName,
+				selections: selections
+			};
+			sendMessage(message);
+		}
+
+		// When calling postMessage, the code needs to call postMessage on the parent and needs to pass in the target origin as the second argument
+		function sendMessage(message)
+		{
+			var url = (window.location != window.parent.location)
+				? document.referrer
+				: document.location.href;
+			window.parent.postMessage(message, url);
+		}
+
+		//=============================
+		// CUSTOM INSTRUCTIONAL MESSAGE
+		//=============================
+		
+		/*
+		The Data-Driven Content object supports displaying a custom instructional message while the report is being authored. When the report is being 
+		viewed in any of the viewers, the message won't show. The custom message is useful for giving instructions to the report author as to 
+		what type of data is required. If the wrong number of data items are assigned or not the correct type of data, or not in the right order,
+		the data-Driven Content author can post a message back to VA and VA will show the message in a pill over the center of the report object. 
+		To send the message, it is sent the same way as the selection message, but instead of sending a *selections* attribute, a *message* 
+		attribute is sent instead.
+		*/
+		
+		function sendInstructionalMessage(strMessage, resultName) {
+			var message = {
+				resultName: resultName,
+				message: strMessage
+			};
+			sendMessage(message);
+		}
+
+    </script>
+  </head>
+  <body>
+    <div id="ddc_chart"></div>
+  </body>
+</html>
