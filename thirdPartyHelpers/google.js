@@ -169,6 +169,34 @@ limitations under the License.
 		}
 	};
 	
+	googleHelper.convertDataOrgChart = function (dataTable, resultData)/*(arrayData, columnsInfo)*/ {
+			if (!resultData || !dataTable)
+			return;
+			
+			var numCols = resultData.columns;
+			//var numCols = columnsInfo.length;
+			for (var r = 0; r < dataTable.length; r++) {
+				// At the highest level, there is no parent ID (= "missing" for string column or "." for numeric column).
+				// An empty string as the parent ID will prevent the node to be displayed with a missing value.
+			    if (dataTable[r][1] === "(ausente)" || dataTable[r][1] === ".") {dataTable[r][1] = "";}
+				if (numCols >= 3 && dataTable[r][2] !== '') {
+					// if an optional formatted role is provided (3rd column), add that to node ID (1st column) as {v: unformattedValue, f: formattedValue}
+					// note: an empty 3rd column means no formatted value
+					dataTable[r][0] = {v: dataTable[r][0], f: dataTable[r][2]};
+				}
+				if (numCols >= 3) {
+					// Tooltip (if any) must be the third column for Google OrgChart
+					// Remove column #3 (format) and let column #4 (tooltip, if any) automatically become column #3
+					dataTable[r].splice(2,1);
+				}
+			}
+			if (numCols >= 3) {
+				// Tooltip (if any) must be the third column for Google OrgChart
+				// Remove column #3 (format) and let column #4 (tooltip, if any) automatically become column #3
+					//columnsInfo.splice(2,1);
+			}
+		}
+	
 	if (!window.va)
 		window.va = {};
     window.va.googleHelper = googleHelper;
