@@ -119,7 +119,11 @@ limitations under the License.
                 va.contentUtil.convertDateColumns(resultData);
                 _dataTable = va.googleHelper.createDataTable(resultData);
                 va.googleHelper.formatData(_dataTable, resultData);
-				va.googleHelper.convertDataOrgChart(dataTable, resultData);
+					
+					//Arreglo el nodo raíz
+					for (var r = 0; r < dataTable.length; r++) {				
+						if (dataTable[r][1] === "(ausente)" || dataTable[r][1] === ".") {dataTable[r][1] = "";}
+					}
                 _selections = va.contentUtil.initializeSelections(resultData);
             }
 
