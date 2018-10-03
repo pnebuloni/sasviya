@@ -122,7 +122,10 @@ limitations under the License.
 					
 					//Arreglo el nodo raíz
 					for (var r = 0; r < _dataTable.length; r++) {				
-						if (_dataTable[r][1] === "(ausente)" || _dataTable[r][1] === ".") {_dataTable[r][1] = "";}
+						if (_dataTable[r][1] === "(ausente)" || _dataTable[r][1] === ".") {
+							console.log("********************entra al if************************");
+							_dataTable[r][1] = "";
+							console.log(dataTable);}
 					}
                 _selections = va.contentUtil.initializeSelections(resultData);
             }
